@@ -1,65 +1,20 @@
 import React, { useState } from 'react';
-import DivergenceList from './DivergenceList';
 import VerificationBanner from './VerificationBanner';
-import EvidenceDrawer from './EvidenceDrawer';
 import AuditModal from './AuditModal';
 import { getAudit } from '../api/client';
-import { ShieldCheck, FileJson, Bot, CheckCircle2 } from 'lucide-react';
-
-const CodeViewer = ({ title, code, highlightedLines = [] }) => {
-  const lines = (code || '// No code provided').split('\n');
-
-  return (
-    <div className="flex h-full w-full flex-col overflow-hidden rounded-xl border border-zinc-800/80 bg-[#121214] shadow-lg">
-      <div className="flex items-center justify-between border-b border-zinc-800/80 bg-[#18181b] px-5 py-3">
-        <h3 className="text-[13px] font-bold tracking-wide text-zinc-200">{title}</h3>
-        <span className="text-[11px] font-mono text-zinc-500">{lines.length} lines</span>
-      </div>
-
-      <div className="flex-1 overflow-y-auto py-4 font-mono text-[13px]">
-        {lines.map((line, index) => {
-          const lineNum = index + 1;
-          const isHighlighted = highlightedLines.includes(lineNum);
-
-          return (
-            <div
-              key={lineNum}
-              className={`flex px-2 py-0.5 transition-colors ${
-                isHighlighted
-                  ? 'border-l-[3px] border-rose-500 bg-rose-950/20 text-rose-300'
-                  : 'border-l-[3px] border-transparent text-zinc-400 hover:bg-zinc-900/40'
-              }`}
-            >
-              <span className="w-10 select-none pr-4 text-right text-[11px] text-zinc-600 font-mono">
-                {lineNum}
-              </span>
-              <span className="whitespace-pre break-all">{line || ' '}</span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-};
+import { 
+  ArrowLeft, 
+  ShieldAlert, 
+  CheckCircle2, 
+  BookOpen, 
+  Cpu, 
+  ExternalLink,
+  Layers
+} from 'lucide-react';
 
 export default function ResultView({ sourceCode, generatedCode, verificationResult, onReset }) {
-  const [activeDivergence, setActiveDivergence] = useState(null);
   const [isAuditOpen, setIsAuditOpen] = useState(false);
   const [auditData, setAuditData] = useState(null);
-
-  // Map backend divergences into the list format expected by DivergenceList & EvidenceDrawer
-  const rawDivergences = verificationResult?.divergences || [];
-  const divergences = rawDivergences.map((d, idx) => ({
-    id: d.divergence_id || `div_${idx}`,
-    functionName: d.function,
-    type: d.type,
-    explanation: d.explanation,
-    testCase: d.test_case ? JSON.stringify(d.test_case.input_data) : 'Custom Boundary Input',
-    expectedOutput: d.test_case ? String(d.test_case.expected_output) : d.expected_behaviour,
-    actualOutput: d.test_case ? String(d.test_case.actual_output) : d.actual_behaviour,
-    evidence: d.evidence || [],
-    highlightLines: [1, 2],
-  }));
 
   const handleOpenAudit = async () => {
     if (verificationResult?.verification_id) {
@@ -75,112 +30,183 @@ export default function ResultView({ sourceCode, generatedCode, verificationResu
     setIsAuditOpen(true);
   };
 
+  const divergences = verificationResult?.divergences || [];
+  const scopes = verificationResult?.verification_scopes || [];
+  const trace = verificationResult?.investigation_trace;
+  const synthesis = verificationResult?.review_synthesis;
+  const steps = verificationResult?.agent_steps || [];
+
   return (
-    <div className="flex flex-col gap-6 animate-in fade-in duration-500 w-full pb-10">
-      {/* 1. Primary Verdict Banner */}
-      <VerificationBanner result={verificationResult} />
+    <div className="space-y-6 animate-in fade-in duration-300 pb-12">
+      {/* Return Action */}
+      <div className="flex items-center justify-between">
+        <button
+          onClick={onReset}
+          className="flex items-center gap-2 text-xs font-semibold text-slate-400 hover:text-white transition-colors"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to Code Editor
+        </button>
+        <span className="text-xs font-mono text-slate-500">
+          ID: {verificationResult?.verification_id || 'LOCAL_RUN'}
+        </span>
+      </div>
 
-      {/* 2. Genuine AI Investigation & Domain Triage Card */}
-      {verificationResult?.investigation_trace && (
-        <div className="rounded-xl border border-indigo-500/30 bg-indigo-950/20 p-5 shadow-lg space-y-4">
-          <div className="flex items-center justify-between border-b border-indigo-500/20 pb-3">
-            <div className="flex items-center gap-2.5">
-              <div className="p-1.5 rounded-lg bg-indigo-500/20 text-indigo-400">
-                <Bot className="h-4 w-4" />
-              </div>
-              <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-200">
-                AI Investigation & Domain Triage
+      {/* Prominent Verdict Banner */}
+      <VerificationBanner result={verificationResult} onOpenAudit={handleOpenAudit} />
+
+      {/* Forensic Divergence Breakdown */}
+      {divergences.length > 0 && (
+        <div className="rounded-2xl border border-rose-500/30 bg-[#131017] p-6 shadow-xl space-y-4">
+          <div className="flex items-center gap-3 border-b border-slate-800/80 pb-3">
+            <div className="p-2 rounded-xl bg-rose-500/10 text-rose-400 border border-rose-500/20">
+              <ShieldAlert className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold uppercase tracking-wider text-rose-200">
+                Where Did It Diverge? ({divergences.length} Discrepancy Found)
               </h3>
-            </div>
-            <span className="text-[10px] font-mono px-2.5 py-1 rounded bg-indigo-900/40 text-indigo-300 border border-indigo-800">
-              Domain: {verificationResult.investigation_trace.domain_detected}
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-            <div>
-              <span className="font-semibold text-zinc-400 uppercase text-[10px] tracking-wider block mb-1">
-                Triage Hypotheses
-              </span>
-              <ul className="space-y-1.5 text-zinc-300">
-                {(verificationResult.investigation_trace.triage_hypotheses || []).map((h, i) => (
-                  <li key={i} className="flex items-start gap-2">
-                    <span className="text-indigo-400 font-mono">›</span>
-                    <span>{h}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            <div>
-              <span className="font-semibold text-zinc-400 uppercase text-[10px] tracking-wider block mb-1">
-                Review Agent Synthesis
-              </span>
-              <p className="text-zinc-300 leading-relaxed">
-                {verificationResult.review_synthesis?.uncertainty_notes ||
-                  verificationResult.review_synthesis?.executive_summary ||
-                  verificationResult.summary ||
-                  'Deterministic sandbox execution completed.'}
+              <p className="text-xs text-slate-400">
+                Differences isolated by differential sandbox execution
               </p>
             </div>
           </div>
-        </div>
-      )}
 
-      {/* 3. Verifiability & Scopes Sub-header */}
-      {verificationResult?.verifiability && (
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 rounded-xl border border-zinc-800 bg-[#121214] p-4 text-xs">
-          <div>
-            <span className="font-semibold text-zinc-400">Verifiability Model: </span>
-            <span className="font-bold text-indigo-400">{verificationResult.verifiability.verifiable}</span>
-            <span className="mx-2 text-zinc-600">|</span>
-            <span className="text-zinc-400">{verificationResult.summary}</span>
+          <div className="space-y-4">
+            {divergences.map((div, idx) => (
+              <div
+                key={idx}
+                className="rounded-xl border border-slate-800 bg-[#0a0c10] p-4 text-xs space-y-3"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/60 pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-slate-500">#{idx + 1}</span>
+                    <span className="font-mono font-bold text-white bg-slate-800 px-2 py-0.5 rounded">
+                      {div.function}()
+                    </span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-rose-950/40 text-rose-300 border border-rose-800/50">
+                      {div.type}
+                    </span>
+                  </div>
+                </div>
+
+                <p className="text-slate-300 leading-relaxed">{div.explanation}</p>
+
+                {div.test_case && (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1 font-mono text-[11px]">
+                    <div className="rounded-lg border border-slate-800 bg-[#10141d] p-3">
+                      <span className="text-[10px] text-slate-500 uppercase tracking-wider block mb-1">
+                        Trigger Input
+                      </span>
+                      <pre className="text-slate-200 whitespace-pre-wrap break-all">
+                        {JSON.stringify(div.test_case.input_data, null, 2)}
+                      </pre>
+                    </div>
+
+                    <div className="rounded-lg border border-emerald-900/40 bg-emerald-950/20 p-3">
+                      <span className="text-[10px] text-emerald-400 uppercase tracking-wider block mb-1">
+                        Expected Output (Source)
+                      </span>
+                      <div className="text-emerald-300 font-bold break-all">
+                        {String(div.test_case.expected_output)}
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border border-rose-900/40 bg-rose-950/20 p-3">
+                      <span className="text-[10px] text-rose-400 uppercase tracking-wider block mb-1">
+                        Actual Output (Candidate)
+                      </span>
+                      <div className="text-rose-300 font-bold break-all">
+                        {String(div.test_case.actual_output)}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
-          <button
-            onClick={handleOpenAudit}
-            className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800/80 px-3 py-1.5 text-xs font-semibold text-zinc-200 hover:bg-zinc-700 transition-all"
-          >
-            <ShieldCheck className="h-4 w-4 text-indigo-400" />
-            Inspect Cryptographic Audit
-          </button>
         </div>
       )}
 
-      {/* 4. Side-by-Side Dual Code Viewers */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 min-h-[450px]">
-        <CodeViewer title="Reference Source" code={sourceCode} />
-        <CodeViewer
-          title="AI Artefact"
-          code={generatedCode}
-          highlightedLines={activeDivergence?.highlightLines || []}
-        />
-      </div>
+      {/* Scope and Agent Investigation Panels */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Verification Scopes */}
+        <div className="rounded-2xl border border-slate-800 bg-[#10141d] p-6 shadow-xl space-y-4">
+          <div className="flex items-center gap-3 border-b border-slate-800/80 pb-3">
+            <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+              <Layers className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold uppercase tracking-wider text-slate-200">
+                Evaluated Verification Scopes
+              </h3>
+              <p className="text-xs text-slate-400">Gated dimensions analyzed by verifier</p>
+            </div>
+          </div>
 
-      {/* 5. Detected Divergences */}
-      <div className="pt-2">
-        <DivergenceList
-          divergences={divergences}
-          activeId={activeDivergence?.id}
-          onCardClick={(issue) => setActiveDivergence(issue)}
-        />
-      </div>
+          <div className="space-y-2.5 text-xs">
+            {scopes.map((s, idx) => (
+              <div
+                key={idx}
+                className="flex items-start justify-between gap-3 p-3 rounded-xl border border-slate-800/80 bg-[#07090e]"
+              >
+                <div>
+                  <span className="font-semibold text-slate-200 block">{s.name}</span>
+                  <span className="text-[11px] text-slate-400">{s.details}</span>
+                </div>
+                <span
+                  className={`text-[10px] font-mono px-2 py-0.5 rounded border font-bold ${
+                    s.status === 'PASS'
+                      ? 'bg-emerald-950/40 text-emerald-400 border-emerald-800/60'
+                      : s.status === 'FAIL'
+                      ? 'bg-rose-950/40 text-rose-400 border-rose-800/60'
+                      : 'bg-slate-800 text-slate-400 border-slate-700'
+                  }`}
+                >
+                  {s.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
 
-      {/* 6. Action Footer */}
-      <div className="flex items-center justify-center pb-8 pt-4 gap-4">
-        <button
-          onClick={onReset}
-          className="rounded-xl border border-zinc-700 bg-zinc-800 px-8 py-3 text-[14px] font-semibold text-zinc-200 shadow-sm transition-all hover:bg-zinc-700 active:scale-[0.98]"
-        >
-          Verify Another Artefact
-        </button>
-      </div>
+        {/* Agent Investigation Lifecycle */}
+        <div className="rounded-2xl border border-slate-800 bg-[#10141d] p-6 shadow-xl space-y-4">
+          <div className="flex items-center gap-3 border-b border-slate-800/80 pb-3">
+            <div className="p-2 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20">
+              <Cpu className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold uppercase tracking-wider text-purple-200">
+                Verification Agent Trace
+              </h3>
+              <p className="text-xs text-slate-400">Deterministic triage actions and synthesis</p>
+            </div>
+          </div>
 
-      {/* 7. Drawers & Modals */}
-      <EvidenceDrawer
-        isOpen={activeDivergence !== null}
-        onClose={() => setActiveDivergence(null)}
-        divergence={activeDivergence}
-      />
+          <div className="space-y-3 text-xs">
+            <div className="p-3 rounded-xl border border-slate-800/80 bg-[#07090e] space-y-1.5 font-mono text-[11px]">
+              {steps.slice(0, 5).map((step, idx) => (
+                <div key={idx} className="flex items-center gap-2 text-slate-300">
+                  <span className="text-indigo-400">✓</span>
+                  <span>{step}</span>
+                </div>
+              ))}
+            </div>
+
+            {synthesis?.uncertainty_notes && (
+              <div className="p-3 rounded-xl border border-slate-800/80 bg-[#07090e]">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-slate-500 block mb-1">
+                  Review Agent Synthesis
+                </span>
+                <p className="text-slate-300 text-[11px] leading-relaxed">
+                  {synthesis.uncertainty_notes}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
 
       <AuditModal
         isOpen={isAuditOpen}

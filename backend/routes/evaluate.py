@@ -1,57 +1,94 @@
-from fastapi import APIRouter, status, Response
-from models.schemas import EvaluationResponse
-from services.evaluation_service import run_evaluation_benchmark
+# backend/routes/evaluate.py
 
-router = APIRouter(prefix="/api", tags=["evaluation"])
+import time
+from typing import Any, Dict
+from fastapi import APIRouter
+from fastapi.responses import Response
 
-@router.get(
-    "/evaluate",
-    response_model=EvaluationResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Run benchmark suite and compute empirical verification metrics",
-)
-async def evaluate_dataset() -> EvaluationResponse:
-    return run_evaluation_benchmark()
+from models.schemas import VerifyRequest
+from routes.scenarios import BENCHMARK_SCENARIOS
+from services.verification_service import run_verification_pipeline
 
-@router.get(
-    "/evaluate/export",
-    status_code=status.HTTP_200_OK,
-    summary="Export reproducible benchmark evaluation audit report in Markdown format",
-)
-async def export_evaluation_report() -> Response:
-    eval_res = run_evaluation_benchmark()
-    m = eval_res.metrics
+router = APIRouter(tags=["evaluation"])
 
-    lines = [
-        f"# HALLUCINATION HUNTER — EVALUATION BENCHMARK AUDIT REPORT",
-        f"**Generated:** {eval_res.evaluated_at}",
-        f"**Dataset:** {eval_res.dataset_name} ({eval_res.total_cases} test cases)",
-        f"",
-        f"## Empirical Impact Metrics",
-        f"| Metric | Measured Value | Standard Target |",
-        f"| :--- | :--- | :--- |",
-        f"| Divergence Detection Accuracy | **{m.divergence_detection_accuracy * 100:.1f}%** | > 85.0% |",
-        f"| Behavioural Equivalence Pass Rate | **{m.behavioural_equivalence_pass_rate * 100:.1f}%** | 100.0% |",
-        f"| False Positive Rate | **{m.false_positive_rate * 100:.1f}%** | < 5.0% |",
-        f"| False Negative Rate | **{m.false_negative_rate * 100:.1f}%** | < 5.0% |",
-        f"| Mean Verification Latency | **{m.mean_verification_latency_ms:.1f} ms** | < 1000 ms |",
-        f"",
-        f"## Case-by-Case Breakdown",
-    ]
 
-    for c in eval_res.cases:
-        status_icon = "PASS" if c.correct else "FAIL"
-        lines.append(f"### [{status_icon}] {c.scenario_id}: {c.title}")
-        lines.append(f"- **Category:** {c.category}")
-        lines.append(f"- **Expected Verdict:** `{c.expected_verdict}`")
-        lines.append(f"- **Actual Verdict:** `{c.actual_verdict}`")
-        lines.append(f"- **Divergences Found:** {c.actual_divergences_count}")
-        lines.append(f"- **Execution Latency:** {c.latency_ms} ms")
-        lines.append("")
+@router.get("/api/evaluate")
+@router.get("/evaluate")
+async def evaluate_benchmarks() -> Dict[str, Any]:
+    results = []
+    divergence_count = 0
+    verified_count = 0
+    start_time = time.time()
 
-    report_content = "\n".join(lines)
-    return Response(
-        content=report_content,
-        media_type="text/markdown",
-        headers={"Content-Disposition": "attachment; filename=hallucination_hunter_benchmark_audit.md"},
-    )
+    for sc in BENCHMARK_SCENARIOS:
+        # Pass dictionary payloads directly into VerifyRequest
+        req = VerifyRequest(
+            source_artifact={
+                "language": "python",
+                "files": [{"path": "main.py", "content": sc["source_code"]}],
+            },
+            generated_artifact={
+                "language": "python",
+                "files": [{"path": "main.py", "content": sc["generated_code"]}],
+            },
+        )
+
+        v_res = run_verification_pipeline(req)
+        actual_verdict = (
+            v_res.verdict.value if hasattr(v_res.verdict, "value") else str(v_res.verdict)
+        )
+        expected_verdict = sc["expected_verdict"]
+        is_match = actual_verdict == expected_verdict
+
+        if "DIVERGENCE" in actual_verdict:
+            divergence_count += 1
+        elif "VERIFIED" in actual_verdict:
+            verified_count += 1
+
+        results.append({
+            "scenario_id": sc["id"],
+            "name": sc["name"],
+            "category": sc.get("category", "GENERAL"),
+            "expected_verdict": expected_verdict,
+            "actual_verdict": actual_verdict,
+            "matched": is_match,
+        })
+
+    total = len(BENCHMARK_SCENARIOS) if BENCHMARK_SCENARIOS else 1
+    accuracy = sum(1 for r in results if r["matched"]) / total
+    mean_latency = ((time.time() - start_time) / total) * 1000
+
+    return {
+        "total_scenarios": len(BENCHMARK_SCENARIOS),
+        "divergence_count": divergence_count,
+        "verified_count": verified_count,
+        "accuracy_score": accuracy,
+        "mean_latency_ms": mean_latency,
+        "scenario_results": results,
+    }
+
+
+@router.get("/api/evaluate/export")
+@router.get("/evaluate/export")
+async def export_benchmark_report():
+    eval_data = await evaluate_benchmarks()
+    accuracy_pct = eval_data["accuracy_score"] * 100
+
+    md_report = f"""# Hallucination Hunter - Benchmark Evaluation Report
+- **Accuracy Score**: {accuracy_pct:.1f}%
+- **Total Scenarios Evaluated**: {eval_data['total_scenarios']}
+- **Caught Divergences**: {eval_data['divergence_count']}
+- **Verified Equivalence Preserved**: {eval_data['verified_count']}
+- **Mean Subprocess Sandbox Latency**: {eval_data['mean_latency_ms']:.1f}ms
+
+## Scenario Execution Breakdown
+| Scenario Name | Category | Expected Verdict | Actual Verdict | Status |
+| :--- | :--- | :--- | :--- | :--- |
+"""
+    for r in eval_data["scenario_results"]:
+        status = "MATCH (PASS)" if r["matched"] else "MISMATCH (FAIL)"
+        md_report += (
+            f"| {r['name']} | `{r['category']}` | `{r['expected_verdict']}` | `{r['actual_verdict']}` | {status} |\n"
+        )
+
+    return Response(content=md_report, media_type="text/markdown")
