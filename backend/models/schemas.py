@@ -6,6 +6,42 @@ from pydantic import BaseModel, Field
 
 # --- Enums ---
 
+
+class EvidenceTier(str, Enum):
+    TIER_1 = "TIER_1"
+    TIER_2 = "TIER_2"
+    TIER_3 = "TIER_3"
+
+from typing import Union
+
+class EvidenceRecord(BaseModel):
+    source_tier: Union[EvidenceTier, str]
+    source_name: str
+    citation_excerpt: str
+    source_url: Optional[str] = None
+    authority_score: float = 1.0
+    relevance_score: float = 1.0
+
+    model_config = {"use_enum_values": True}
+
+class DomainContext(str, Enum):
+    NUMERICAL = "NUMERICAL_FINANCIAL"
+    DATA_PROCESSING = "DATA_STRUCTURES_PARSING"
+    GENERAL_LOGIC = "CONDITIONAL_LOGIC"
+    SYSTEMS = "EXCEPTIONS_SYSTEMS"
+
+class AgentInvestigationTrace(BaseModel):
+    domain_detected: DomainContext
+    triage_hypotheses: List[str] = Field(default_factory=list)
+    focus_units: List[str] = Field(default_factory=list)
+    llm_assisted: bool = False
+
+class AgentReviewSynthesis(BaseModel):
+    executive_summary: str
+    recommended_action: str
+    uncertainty_notes: Optional[str] = None
+    llm_assisted: bool = False
+
 class Language(str, Enum):
     PYTHON = "python"
 
@@ -232,3 +268,24 @@ class VerifiabilityModel(BaseModel):
     evaluated_scopes: List[str]
     unevaluated_scopes: List[str]
     limitations: List[str]
+class StructuralSummary(BaseModel):
+    matched_units_count: int = 0
+    signatures_preserved_count: int = 0
+    structural_differences_count: int = 0
+
+class VerifyResponse(BaseModel):
+    verification_id: str
+    verdict: VerificationVerdict
+    confidence: ConfidenceLevel
+    confidence_reasons: List[str] = Field(default_factory=list)
+    summary: Optional[str] = None
+    recommended_action: Optional[str] = None
+    verifiability: Optional[VerifiabilityModel] = None
+    verification_scopes: Optional[List[VerificationScopeItem]] = Field(default_factory=list)
+    verification_signals: VerificationSignals
+    structural_summary: Optional[StructuralSummary] = None
+    agent_steps: List[str] = Field(default_factory=list)
+    matched_units: List[MatchedUnit] = Field(default_factory=list)
+    divergences: List[DivergenceDetail] = Field(default_factory=list)
+    conflict_report: Optional[ConflictReport] = None
+    audit: AuditRecord

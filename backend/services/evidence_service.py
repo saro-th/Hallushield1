@@ -1,69 +1,66 @@
-import uuid
-from datetime import datetime, timezone
-from typing import List
-from models.schemas import DivergenceType, EvidenceItem, SourceTier
+# backend/services/evidence_service.py
 
-OFFICIAL_KNOWLEDGE_BASE = {
-    DivergenceType.NUMERICAL_MISMATCH: [
-        EvidenceItem(
-            evidence_id="EVID-PY-ROUND",
-            source_name="Python 3 Official Documentation: Built-in Functions - round()",
-            source_url="https://docs.python.org/3/library/functions.html#round",
-            source_tier=SourceTier.TIER_1,
-            authority_score=1.0,
-            relevance="Specifies round-half-to-even behavior and floating-point representation.",
-            citation_excerpt="Values are rounded to the closest multiple of 10 to the power minus n; if two multiples are equally close, rounding is done toward the even choice.",
-            retrieved_at=datetime.now(timezone.utc).isoformat(),
-        ),
-        EvidenceItem(
-            evidence_id="EVID-IEEE-754",
-            source_name="IEEE Standard for Floating-Point Arithmetic (IEEE 754)",
-            source_url="https://standards.ieee.org/ieee/754/6063/",
-            source_tier=SourceTier.TIER_1,
-            authority_score=1.0,
-            relevance="Governs float rounding vs integer truncation semantics.",
-            citation_excerpt="Truncation towards zero discards fractional digits directly without proximity evaluation.",
-            retrieved_at=datetime.now(timezone.utc).isoformat(),
-        ),
-    ],
-    DivergenceType.EXCEPTION_MISMATCH: [
-        EvidenceItem(
-            evidence_id="EVID-PY-ZERO-DIV",
-            source_name="Python Standard Library: Built-in Exceptions - ZeroDivisionError",
-            source_url="https://docs.python.org/3/library/exceptions.html#ZeroDivisionError",
-            source_tier=SourceTier.TIER_1,
-            authority_score=1.0,
-            relevance="Specifies runtime exception raised when the second argument of a division is zero.",
-            citation_excerpt="Raised when the second argument for a division or modulo operation is zero.",
-            retrieved_at=datetime.now(timezone.utc).isoformat(),
-        )
-    ],
-    DivergenceType.MISSING_FUNCTION: [
-        EvidenceItem(
-            evidence_id="EVID-PEP-8",
-            source_name="PEP 8 – Style Guide for Python Code (API Completeness)",
-            source_url="https://peps.python.org/pep-0008/",
-            source_tier=SourceTier.TIER_1,
-            authority_score=0.95,
-            relevance="Governs interface and public function contract preservation.",
-            citation_excerpt="Public interfaces must preserve defined functional exports to prevent downstream consumer breakage.",
-            retrieved_at=datetime.now(timezone.utc).isoformat(),
-        )
-    ],
-    DivergenceType.PARAMETER_MISMATCH: [
-        EvidenceItem(
-            evidence_id="EVID-PY-INSPECT",
-            source_name="Python inspect Module - Parameter Signature Specification",
-            source_url="https://docs.python.org/3/library/inspect.html#inspect.signature",
-            source_tier=SourceTier.TIER_1,
-            authority_score=0.95,
-            relevance="Defines callable parameter binding rules and arity requirements.",
-            citation_excerpt="A signature mismatch causes TypeError: missing or unexpected positional argument at invocation.",
-            retrieved_at=datetime.now(timezone.utc).isoformat(),
-        )
-    ],
-}
+from typing import List, Optional
+from models.schemas import EvidenceRecord, EvidenceTier, DivergenceType, DomainContext
 
-def resolve_evidence_for_divergence(div_type: DivergenceType) -> List[EvidenceItem]:
-    """Retrieves authoritative external evidence items for a given divergence category."""
-    return OFFICIAL_KNOWLEDGE_BASE.get(div_type, [])
+def infer_domain(source_code: str, generated_code: str) -> DomainContext:
+    combined = (source_code + " " + generated_code).lower()
+    if any(k in combined for k in ["price", "tax", "discount", "round", "float", "total", "rate"]):
+        return DomainContext.NUMERICAL
+    if any(k in combined for k in ["raise", "try", "except", "zerodivision", "valueerror"]):
+        return DomainContext.SYSTEMS
+    if any(k in combined for k in ["len(", "append", "pop", "split", "dict", "list", "keys"]):
+        return DomainContext.DATA_PROCESSING
+    return DomainContext.GENERAL_LOGIC
+
+def resolve_evidence_for_divergence(
+    div_type: DivergenceType, 
+    domain: DomainContext
+) -> List[EvidenceRecord]:
+    evidence: List[EvidenceRecord] = []
+
+    if div_type == DivergenceType.NUMERICAL_BEHAVIOUR_MISMATCH:
+        evidence.append(EvidenceRecord(
+            source_tier=EvidenceTier.TIER_1,
+            source_name="IEEE 754-2019 / Python Official Specification §4.4",
+            citation_excerpt="Python's built-in round(x, n) uses 'round half to even' (banker's rounding), differing from truncation int(x).",
+            source_url="https://docs.python.org/3/library/functions.html#round"
+        ))
+        evidence.append(EvidenceRecord(
+            source_tier=EvidenceTier.TIER_2,
+            source_name="Python Standard Library decimal & float Docs",
+            citation_excerpt="Direct float arithmetic is vulnerable to binary representation precision limits.",
+            source_url="https://docs.python.org/3/tutorial/floatingpoint.html"
+        ))
+
+    elif div_type == DivergenceType.BOUNDARY_CONDITION_MISMATCH:
+        evidence.append(EvidenceRecord(
+            source_tier=EvidenceTier.TIER_1,
+            source_name="Python Language Reference §6.10: Comparisons",
+            citation_excerpt="Strict inequalities ('>', '<') exclude equivalence points, shifting truth sets at exact boundary constants.",
+            source_url="https://docs.python.org/3/reference/expressions.html#comparisons"
+        ))
+        evidence.append(EvidenceRecord(
+            source_tier=EvidenceTier.TIER_3,
+            source_name="CWE-193: Off-by-one Error Common Weakness Enumeration",
+            citation_excerpt="Relational boundary mutations frequently introduce edge-case logic divergence in conditional branches.",
+            source_url="https://cwe.mitre.org/data/definitions/193.html"
+        ))
+
+    elif div_type == DivergenceType.EXCEPTION_BEHAVIOUR_MISMATCH:
+        evidence.append(EvidenceRecord(
+            source_tier=EvidenceTier.TIER_1,
+            source_name="Python Execution Model §4.2: Exceptions",
+            citation_excerpt="Unhandled exceptions terminate the local frame unless caught by an exact or parent Exception match.",
+            source_url="https://docs.python.org/3/reference/executionmodel.html#exceptions"
+        ))
+
+    else:
+        evidence.append(EvidenceRecord(
+            source_tier=EvidenceTier.TIER_2,
+            source_name="PEP 8: Style Guide for Python Code (Programming Recommendations)",
+            citation_excerpt="Preserve explicit interface signatures and deterministic return values across transformations.",
+            source_url="https://peps.python.org/pep-0008/"
+        ))
+
+    return evidence

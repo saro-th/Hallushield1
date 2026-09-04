@@ -23,12 +23,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount all endpoint routers
+# Mount all endpoint routers with /api prefix AND base fallback
+app.include_router(verify_router, prefix="/api")
+app.include_router(scenarios_router, prefix="/api")
+app.include_router(audit_router, prefix="/api")
+app.include_router(evaluate_router, prefix="/api")
+
+# Also include without prefix so any non-prefixed tests remain 20/20 green
 app.include_router(verify_router)
 app.include_router(scenarios_router)
 app.include_router(audit_router)
 app.include_router(evaluate_router)
 
+@app.get("/api/health", tags=["system"])
 @app.get("/health", tags=["system"])
 async def health_check():
     return {
